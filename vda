@@ -1,0 +1,826 @@
+#include <SPI.h>
+
+
+
+#include <RTClib.h>
+#include <XPT2046_Touchscreen.h>
+#define CS_PIN  33
+#define TIRQ_PIN  32
+XPT2046_Touchscreen ts(CS_PIN);
+
+RTC_DS1307 RTC;
+#include <Wire.h>
+
+#include "Adafruit_GFX_AS.h"
+#include "Adafruit_ILI9341_AS.h"
+//#include "Fonts/FreeSerifBold24pt7b.h"
+//#include "Fonts/FreeSerifBold12pt7b.h"
+
+#include <SdFat.h>    
+SdFat SD; 
+// Use hardware SPI lines
+#define _sclk 52
+#define _miso 50 // Needed for SD card, but does not need to be connected to TFT
+#define _mosi 51 // Master Out Slave In to send commands/data to TFT and SD card
+          
+#define _cs 8
+#define _dc 7
+#define _sdcs 34
+#define _rst 5
+Adafruit_ILI9341_AS tft = Adafruit_ILI9341_AS(_cs, _dc, _rst); // Invoke custom library
+
+// These are used when calling drawBMP() function, see examples in loop()
+#define BU_BMP 1 // Temporarily flip the TFT coords for standard Bottom-Up bit maps
+#define TD_BMP 0 // Draw inverted Top-Down bitmaps in standard coord frame
+
+#define pinSilnik 4
+#define pinBuzzer 3
+#define pinLed 2
+
+//Wire for RTC: pin 20 to RTC's SDA, pin 21 to SCL (probably)
+
+
+unsigned long prevIlluminated=0;
+//int x=0;int y=0;
+
+uint8_t menuLevel=0;
+
+uint8_t brightMode=2;
+
+uint8_t previousHour=0;
+uint8_t previousMinute=0;
+uint8_t previousSecond=0;
+String printedTime= "00:00";
+
+boolean wasScreenFilled=0;
+ 
+char backgroundColor = 0xFFFF;
+
+unsigned long illum=5;
+unsigned long previllum=0;
+bool budzic=1;
+bool pobudka=0;
+uint16_t alarm[5][9];
+
+uint8_t motorSpeed=0;
+
+int8_t setHour;
+uint8_t setMinute;
+uint8_t setDay;
+uint8_t setMonth;
+uint8_t setYear;
+
+
+
+void setup() {
+  delay(50);
+// alarm[0][0]=21;
+// alarm[0][1]=15;
+// alarm[0][2]=1;
+// alarm[0][3]=1;
+// alarm[0][4]=1;
+// alarm[0][5]=1;
+// alarm[0][6]=1;
+// alarm[0][7]=1;
+// alarm[0][8]=1;
+ 
+  ///////////////////////////////////
+    Wire.begin();
+    RTC.begin();
+  if (! RTC.isrunning()) {
+    Serial.println("RTC is NOT running!");
+    // following line sets the RTC to the date & time this sketch was compiled
+   RTC.adjust(DateTime(__DATE__, __TIME__));
+  }
+   
+Serial.begin(9600);
+  ///////////////////////////////////
+  if (!SD.begin(_sdcs, SPI_FULL_SPEED)) {  // sdFat library allows speed setting, e.g. SPI_HALF_SPEED
+    //if (!SD.begin(_sdcs)) {              // Only needed when standard SD library is used
+    Serial.println(F("failed!"));
+    //return;
+  }
+///////////////////////////////////////////
+  tft.init(); // Initialise the display (various parameters configured)
+  
+  ///////////////////////////////////////////
+
+// Draws raw image with top left corner pixel at x,y = 0,0
+  
+
+  ts.begin();
+  ts.setRotation(1);
+   tft.setRotation(1);
+analogWrite(pinLed, 5);
+   drawRAW("bootbmp.raw", 0, 0, 320, 240);
+   delay(2500);                                              // <<<<<<<<<<<//zmienić na 2500///////////////////////////////////////////////////////////
+
+   for(int i=1;i<13; i++){tft.fillRect(160-13*i, 120-10*i, 2*13*i, 2*12*i, 0xD7FD);}
+   digitalWrite(pinBuzzer, LOW);
+   
+
+}
+
+boolean wastouched = true;
+
+void loop() {
+
+if(brightMode==2){analogWrite(pinLed, 0);}
+else{if(brightMode==1){analogWrite(pinLed, 130);}
+else{if(brightMode==3){
+previllum=illum;
+
+for(int i=0; i<30; i++){illum+=analogRead(A3);};
+ illum=illum/30;
+ illum=255-((illum/4)+10);
+
+//różnica między poprzednią i obecną wartością
+//if(((illum-previllum)>150)||((previllum-illum)>150)){if(millis()>(prevIlluminated+5000)){ if(illum<110){analogWrite(pinLed, illum);}else{analogWrite(pinLed, 200);}; prevIlluminated=millis();};}
+if(((illum-previllum)>50)||((previllum-illum)>50)){if(millis()>(prevIlluminated+5000)){if(illum>180){illum=180;}; analogWrite(pinLed, illum); prevIlluminated=millis();};}
+}}}
+
+
+DateTime now = RTC.now();
+ setHour =now.hour();
+ setMinute=now.minute();
+ setDay=now.day();
+ setMonth=now.month();
+ setYear=now.year()-2000;
+
+
+  
+
+
+ budzik();
+
+switch (menuLevel){
+  case 0: mainScreen(backgroundColor); 
+  break;
+
+  
+  case 1: menuChoose();
+  break;
+
+  case 11:  menuVDA();      break;
+  case 12: menuAlarm();     break;
+  case 13: menuGreet();     break;
+  case 14: menuSettings();  break;
+
+  case 111: hcsHD();        break;
+  case 112: hcsLD();        break;
+  case 113: manualVDA();     break;
+
+  case 141: timeSetting(); break;
+  case 142: brightSetting(); break;
+  
+//
+//  case 111: menuAlarmSet(0);break;
+//  case 112: menuAlarmSet(1);break;
+//  case 113: menuAlarmSet(2);break;
+//  case 114: menuAlarmSet(3);break;
+//
+// case 12: menuVda();
+//  break;
+//
+//   case 13: menuZyczenia();
+//  break;
+//
+//   case 14: menuUstawienia();
+//  break;
+//
+//   case 141: menuUstawieniaCzas();break;
+//
+//   case 142: menuUstawieniaKontrast();break;
+//
+//   case 143: menuUstawieniaPodswietlenie();break;
+//   
+}
+//jeden znak size 1 - 6px
+
+if(buttonRead(A10)){
+tft.fillRect(20, 20, 280, 200, 0xF800);
+tft.setTextColor(0xFFFF);
+tft.setTextSize(5);
+tft.setCursor(25,50);
+tft.print("EMERGENCY");
+tft.setCursor(100,100);
+tft.print("STOP");
+tft.setCursor(55,170);
+tft.print("ENGAGED");
+delay(100);
+wasScreenFilled=0;
+}
+
+
+}
+
+void mainScreen(char backgroundColor) {
+  
+DateTime now = RTC.now();
+
+//////////////////////////////Czyszczenie pól godziny, minuty, sekundy.../////////////////////////////////////////////////
+//
+
+
+
+if(!wasScreenFilled){ drawRAW("ekrglow.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+if(!(now.hour()==previousHour)){
+  
+
+tft.fillRect(5, 30, 160, 100, backgroundColor);
+
+}
+
+if(!(now.minute()==previousMinute)){
+  
+tft.fillRect(165, 30, 159, 100, backgroundColor);
+budzic=1;
+}
+
+if(!(now.second()==previousSecond)){
+  
+tft.fillRect(230, 128, 70, 40, backgroundColor);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
+
+}
+
+/////////////////////////////////////////////////Wypisanie czasuna ekran/////////////////////////////////////////////////
+
+
+tft.setTextColor(ILI9341_BLACK);  tft.setTextSize(12); // tft.setFont(&FreeSerifBold24pt7b);
+
+//String printedTime= String(0+now.hour()+":"+ now.minute());1
+//tft.print(printedTime);
+#define hSPx 15 //hourStartPointx / y
+#define hSPy 40
+
+//if(now.hour()<10){ tft.setCursor(hSPx, hSPy); tft.print(0); tft.setCursor(hSPx+62, hSPy); tft.print(now.hour());}else{tft.setCursor(hSPx, hSPy); tft.print(now.hour());};
+// if(now.minute()<10){tft.setCursor(hSPx+165, hSPy); tft.print(0); tft.setCursor(hSPx+230, hSPy); tft.print(now.minute());}else{tft.setCursor(hSPx+165, hSPy); tft.print(now.minute());};
+//       tft.setTextSize(1); if(now.second()<10){tft.setCursor(hSPx+260, hSPy+50); tft.print(0); tft.setCursor(hSPx+283, hSPy+50); tft.print(now.second());}else{tft.setCursor(hSPx+260, hSPy+50); tft.print(now.second());};
+//       tft.setTextSize(2); tft.setCursor(hSPx+140, hSPy-15); tft.print(":");
+
+if(now.hour()<10){ tft.setCursor(hSPx, hSPy); tft.print(0); tft.setCursor(hSPx+70, hSPy); tft.print(now.hour());}else{tft.setCursor(hSPx, hSPy); tft.print(now.hour());};
+ if(now.minute()<10){tft.setCursor(hSPx+150, hSPy); tft.print(0); tft.setCursor(hSPx+220, hSPy); tft.print(now.minute());}else{tft.setCursor(hSPx+150, hSPy); tft.print(now.minute());};
+       tft.setTextSize(5); if(now.second()<10){tft.setCursor(hSPx+223, hSPy+90); tft.print(0); tft.setCursor(hSPx+253, hSPy+90); tft.print(now.second());}else{tft.setCursor(hSPx+223, hSPy+90); tft.print(now.second());};
+       tft.setTextSize(10); tft.setCursor(130, 60); tft.print(":");
+
+
+       
+//tft.drawNumber(co?, x, y, size);
+         
+////////////////////////////////////////////////////////Zapisanie wartosci obecnego czasu///////////////////////////////////////////
+previousHour=now.hour();
+previousMinute=now.minute();
+previousSecond=now.second();
+
+
+
+////////////////////////////////////////////Odczytanie digitizera///////////////////////////////////////////////
+
+if(ts.touched()){menuLevel=1; wasScreenFilled=0;}
+
+
+  
+}
+
+
+
+void menuChoose(){
+
+//if(!wasScreenFilled){ drawRAW("mglbezz.raw", 0, 0, 320, 240); wasScreenFilled=1; delay(50);}      //opcja bez zyczen!
+
+if(!wasScreenFilled){ drawRAW("mgldark.raw", 0, 0, 320, 240); wasScreenFilled=1; delay(50);}
+
+
+//////////////////////////////////////////////////////////////////
+if(posTouch(0,0,110,110)){menuLevel=11;wasScreenFilled=0;};   //  tft.drawRect(0,0,110,110, 0xF800);
+if(posTouch(130,0,230,110)){menuLevel=12;wasScreenFilled=0;};  // tft.drawRect(130,0,110,110, 0xF800);
+if(posTouch(0,130,110,240)){menuLevel=13;wasScreenFilled=0;};  // tft.drawRect(0,130,110,110, 0xF800);
+
+//if(posTouch(65,130,175,230)){menuLevel=14;wasScreenFilled=0;}; // tft.drawRect(130,130,100,100, 0xF800); //opcja bez zyczen: to zamiast linijki nizej oraz linijka level 13 comment
+if(posTouch(130,130,230,230)){menuLevel=14;wasScreenFilled=0;}; // tft.drawRect(130,130,100,100, 0xF800);
+
+
+if(posTouch(255,80,310,145)){menuLevel=0;wasScreenFilled=0;};  //  tft.drawRect(255,80,55,65, 0xF800);
+
+
+//////////////////////////////////////////////////////////////////
+}
+
+
+
+void menuVDA(){
+  if(!wasScreenFilled){ drawRAW("mtsmenu.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+  
+  if(posTouch(0,0,220,70)){menuLevel=111;wasScreenFilled=0;};    //  tft.drawRect(0,0,220,70, 0xF800);
+  if(posTouch(0,80,220,155)){menuLevel=112;wasScreenFilled=0;};  // tft.drawRect(0,80,220,75, 0xF800);
+  if(posTouch(0,165,220,235)){menuLevel=113;wasScreenFilled=0;}; //  tft.drawRect(0,165,220,70, 0xF800);
+  if(posTouch(250,80,310,150)){menuLevel=1;wasScreenFilled=0;};  //  tft.drawRect(250,80,60,70, 0xF800);
+  
+}
+
+void hcsHD(){
+  //pin pinSilnik silnika
+if(!wasScreenFilled){ drawRAW("hcshigd.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+  for(int i=0; i<3; i++)
+  {
+ unsigned long  programStart = millis();
+ bool tocz=1;
+
+do{
+  if((millis()-programStart)<200){analogWrite(pinSilnik, 255);}
+    else{do{}while(!buttonRead(A8));if((millis()-programStart)<700){analogWrite(pinSilnik, 150);}
+            else{do{}while(!buttonRead(A8));if((millis()-programStart)<1200){analogWrite(pinSilnik, 255);}
+              else{do{}while(!buttonRead(A8));if((millis()-programStart)<1700){analogWrite(pinSilnik, 180);}
+                else{do{}while(!buttonRead(A8));if((millis()-programStart)<2300){analogWrite(pinSilnik, 255);}
+                  else{do{}while(!buttonRead(A8));if((millis()-programStart)<2800){analogWrite(pinSilnik, 200);}
+                    else{do{}while(!buttonRead(A8));if((millis()-programStart)<3300){analogWrite(pinSilnik, 255);}
+                      else{do{}while(!buttonRead(A8));if((millis()-programStart)<3800){analogWrite(pinSilnik, 220);}
+                        else{do{}while(!buttonRead(A8));if((millis()-programStart)<4300){analogWrite(pinSilnik, 255);}
+                    else{tocz=0;}}}}}}}}};
+
+   if(buttonRead(A10)){tocz=0;}
+}while(tocz);
+  }
+  
+motorBrake(pinSilnik);
+analogWrite(pinSilnik, 0);
+wasScreenFilled=0;
+ menuLevel=11;   
+  }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void hcsLD(){//pin pinSilnik silnika
+
+if(!wasScreenFilled){ drawRAW("hcslowd.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+  for(int i=0; i<1; i++)
+  {
+ unsigned long  programStart = millis();
+ bool tocz=1;
+
+do{
+  if((millis()-programStart)<200){analogWrite(pinSilnik, 255);}
+    else{do{}while(!buttonRead(A8));if((millis()-programStart)<5000){analogWrite(pinSilnik, 150);}
+            else{do{}while(!buttonRead(A8));if((millis()-programStart)<10000){analogWrite(pinSilnik, 180);}
+              else{do{}while(!buttonRead(A8));if((millis()-programStart)<15000){analogWrite(pinSilnik, 210);}
+                else{do{}while(!buttonRead(A8));if((millis()-programStart)<20000){analogWrite(pinSilnik, 255);}
+                   else{tocz=0;}}}}};
+
+   if(buttonRead(A10)){tocz=0;}
+}while(tocz);
+  }
+  
+motorBrake(pinSilnik);
+analogWrite(pinSilnik, 0);
+wasScreenFilled=0;
+ menuLevel=11;   }
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void manualVDA(){
+  
+  if(!wasScreenFilled){ drawRAW("mtsmanu.raw", 0, 0, 320, 240); wasScreenFilled=1;};
+uint8_t prevMotorSpeed=motorSpeed;
+
+ 
+bool tocz=1;
+
+int printSpeed;
+if(motorSpeed==0){printSpeed=0;}else{printSpeed=(motorSpeed-90)/1.35;}
+tft.setTextSize(6);
+tft.setTextColor(0xFFFF);
+
+
+
+  tft.setCursor(5,100);
+tft.print(printSpeed);
+tft.setCursor(110,100);
+tft.print("CPM");
+
+
+
+analogWrite(pinSilnik, motorSpeed);
+
+if(posTouch(50,0,160,60)){if(motorSpeed==0){motorSpeed=135;}else{if(motorSpeed<250){motorSpeed+=12;}}};   //   tft.drawRect(50,0,110,60, 0xF800);
+ if(posTouch(50,160,160,240)){if(motorSpeed>141){motorSpeed-=12;}else{motorSpeed=0;}};    //  tft.drawRect(50,160,110,80, 0xF800);
+ if(posTouch(230,80,310,150)){analogWrite(pinSilnik, 180);tocz=0; motorSpeed=0; motorBrake(pinSilnik); menuLevel=11; wasScreenFilled=0;}; //   tft.drawRect(230,80,80,70, 0xF800);
+ if(buttonRead(A10)){motorSpeed=0;analogWrite(pinSilnik, 180);motorBrake(pinSilnik); tocz=0;menuLevel=11;wasScreenFilled=0;}
+ if(!(motorSpeed==prevMotorSpeed)&&tocz){
+  tft.fillRect(5, 100, 105, 50, 0);
+   analogWrite(pinSilnik, 255); delay(100);
+   
+};
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void menuAlarm(){ 
+ if(!wasScreenFilled){ drawRAW("alamenu.raw", 0, 0, 320, 240); wasScreenFilled=1;};
+
+if(posTouch(0,0,220,70)){wasScreenFilled=0;alarmSet(1);};   //   tft.drawRect(0,0,220,70, 0xF800);
+  if(posTouch(0,80,220,155)){wasScreenFilled=0;alarmSet(2);}; //  tft.drawRect(0,80,220,75, 0xF800);
+  if(posTouch(0,165,220,235)){wasScreenFilled=0;alarmSet(3);};  // tft.drawRect(0,165,220,70, 0xF800);
+  if(posTouch(250,80,310,150)){wasScreenFilled=0;menuLevel=1;};  //  tft.drawRect(250,80,60,70, 0xF800);
+   }
+   
+void menuGreet(){;
+
+unsigned long  programStart = millis();
+ bool tocz=1;
+
+do{
+  if((millis()-programStart)<8000){if(!wasScreenFilled){ drawRAW("gretraw.raw", 0, 0, 320, 240); wasScreenFilled=1;}} else{tocz=0;};
+                     
+
+   if(buttonRead(A10)||posTouch(0,0,320,240)){tocz=0;}
+}while(tocz);
+
+wasScreenFilled=0;
+menuLevel=1;
+
+                               
+                
+                
+}  //  tft.drawRect(250,80,60,70, 0xF800);
+
+                
+void menuSettings(){
+if(!wasScreenFilled){ drawRAW("setting.raw", 0, 0, 320, 240); wasScreenFilled=1;};
+
+if(posTouch(0,25,220,100)){wasScreenFilled=0; menuLevel=141;};
+if(posTouch(0,140,220,220)){wasScreenFilled=0;menuLevel=142;};
+if(posTouch(250,80,310,150)){wasScreenFilled=0;menuLevel=1;};  //  tft.drawRect(250,80,60,70, 0xF800);
+  
+  }
+
+
+void timeSetting(){
+if(!wasScreenFilled){ drawRAW("timeset.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+int tocz=1; 
+                                                                                            
+while(tocz==1){
+
+uint8_t prevHour=setHour;
+uint8_t prevMinute=setMinute;
+
+tft.setTextSize(6);
+tft.setTextColor(0xFFFF);
+
+if(setHour>9){
+tft.setCursor(20,90);
+tft.print(setHour);
+}else{
+  tft.setCursor(20,90);
+tft.print(0);
+tft.setCursor(56,90);
+tft.print(setHour);
+}
+
+if((setMinute)>9){
+tft.setCursor(130,90);
+tft.print(setMinute);
+}else{
+  tft.setCursor(130,90);
+tft.print(0);
+tft.setCursor(166,90);
+tft.print(setMinute);
+}
+
+tft.setCursor(100,90);
+tft.print(":");
+
+  if(posTouch(10,2,105,80)){setHour+=5; if(!(setHour<24)){setHour=0;};}             //    tft.drawRect(10,2,95,60, 0xF800);
+  if(posTouch(10,180,105,235)){if(setHour){--setHour;}else{setHour=23;};}          //     tft.drawRect(10,180,95,55, 0xF800);
+  
+  if(posTouch(140,2,230,80)){setMinute+=5; if(!(setMinute<60)){setMinute=0;};}     //     tft.drawRect(140,2,90,60, 0xF800);
+  if(posTouch(140,180,225,235)){if(setMinute){--setMinute;}else{setMinute=59;};}     //   tft.drawRect(140,180,85,55, 0xF800);
+  
+  if(posTouch(255,40,315,110)){setHour=0; setMinute=0;};                            //    tft.drawRect(255,40,60,70, 0xF800);
+  if(posTouch(255,120,315,190)){wasScreenFilled=0;tocz=2;};  //    tft.drawRect(255,120,60,70, 0xF800);
+  
+if(!(setHour==prevHour)){tft.fillRect(10, 80, 80, 80, 0);};
+if(!(setMinute==prevMinute)){tft.fillRect(120, 80, 80, 80, 0);};
+
+
+}
+
+while(tocz==2){
+  if(!wasScreenFilled){ drawRAW("dateset.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+
+
+uint8_t prevDay=setDay;
+uint8_t prevMonth=setMonth;
+uint8_t prevYear=setYear;
+
+tft.setTextSize(6);
+tft.setTextColor(0xFFFF);
+
+if(setDay>9){
+tft.setCursor(0,90);
+tft.print(setDay);
+}else{
+  tft.setCursor(0,90);
+tft.print(0);
+tft.setCursor(36,90);
+tft.print(setDay);
+}
+
+if((setMonth)>9){
+tft.setCursor(80,90);
+tft.print(setMonth);
+}else{
+  tft.setCursor(80,90);
+tft.print(0);
+tft.setCursor(116,90);
+tft.print(setMonth);
+}
+
+tft.setCursor(155,90);
+tft.print(setYear);
+
+//tft.setCursor(100,90);
+//tft.print(":");
+
+  if(posTouch(0,0,60,60)){
+    
+  setDay+=1;
+  
+  if((setMonth==1)||(setMonth==3)||(setMonth==5)||(setMonth==7)||(setMonth==8)||(setMonth==10)||(setMonth==12)) {if(!(setDay<32)){setDay=1;};}
+  else{if(!(setMonth==2)){if(!(setDay<31)){setDay=1;};}else{if(!(setDay<30)){setDay=1;}}}}
+  
+  
+ // tft.drawRect(0,0,60,60, 0xF800);
+  if(posTouch(0,180,60,235)){if((setDay>1)){--setDay;}else{setDay=1;};}           //    tft.drawRect(0,180,60,55, 0xF800);
+  
+  if(posTouch(90,0,140,60)){setDay=1; setMonth+=1; if(!(setMonth<13)){setMonth=1;};}    //      tft.drawRect(90,0,54,60, 0xF800);
+  if(posTouch(90,180,140,235)){setDay=1; if(setMonth){--setMonth;}else{setMonth=12;};}    //    tft.drawRect(90,180,50,55, 0xF800);
+
+  if(posTouch(165,0,230,60)){setYear+=1; if(!(setYear<99)){setYear=0;};}       //   tft.drawRect(165,0,65,60, 0xF800);
+  if(posTouch(170,180,230,235)){if((setYear>18)){--setYear;}else{setYear=18;};}    //    tft.drawRect(170,180,60,55, 0xF800);
+  
+  if(posTouch(255,120,315,190)){wasScreenFilled=0;tocz=0;menuLevel=14;RTC.adjust(DateTime(setYear+2000, setMonth, setDay, setHour, setMinute, 0));};   //   tft.drawRect(255,120,60,70, 0xF800);
+  
+if(!(setDay==prevDay)){tft.fillRect(0, 80, 80, 75, 0);};
+if(!(setMonth==prevMonth)){tft.fillRect(79, 80, 80, 80, 0);};
+if(!(setYear==prevYear)){tft.fillRect(153, 80, 80, 80, 0);};
+
+
+  
+}
+
+}
+
+
+void brightSetting(){
+
+if(!wasScreenFilled){ drawRAW("brights.raw", 0, 0, 320, 240); wasScreenFilled=1;}
+
+
+
+
+  if(posTouch(0,0,220,70)){wasScreenFilled=0;menuLevel=14;wasScreenFilled=0;brightMode=1;};     // tft.drawRect(0,0,220,70, 0xF800);
+  if(posTouch(0,80,220,155)){wasScreenFilled=0;menuLevel=14;wasScreenFilled=0;brightMode=2;};  // tft.drawRect(0,80,220,75, 0xF800);
+  if(posTouch(0,165,220,235)){wasScreenFilled=0;menuLevel=14;wasScreenFilled=0;brightMode=3;}; //  tft.drawRect(0,165,220,70, 0xF800);
+if(posTouch(250,80,310,150)){wasScreenFilled=0;menuLevel=14;};  //  tft.drawRect(250,80,60,70, 0xF800);
+
+
+  
+}
+
+
+void drawRoundRectSmooth(uint16_t x0, uint16_t y0, uint16_t w, uint16_t h, uint16_t radius, uint16_t color1, uint16_t color2, uint16_t fade){
+
+uint16_t       i, i2;
+uint16_t  color;
+
+for(i=0; i<fade; i+=1) {
+    i2 = i / 2;
+
+  //  if(color1>color2){ color= color1-(i*(color1-color2)/fade);}else{ color= color2-(i*(color2-color1)/fade);};
+    
+    if(color1>color2){ color= color1-((color1-color2)/fade*i);}else{ color= color2-((color2-color1)/fade*i);};
+    
+    Serial.println(color);
+   tft.setTextSize(1); // tft.setFont(&FreeSerifBold24pt7b);
+ 
+    tft.drawRoundRect(x0+i2, y0+i2, w-i, h-i, (radius-i)/8, color);
+    }
+
+
+
+}
+
+#define BUFF_SIZE 80
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void drawRAW(char *filename, int16_t x, int16_t y, int16_t rawWidth, int16_t rawHeight) {
+  File     rawFile;
+  uint8_t  sdbuffer[2 * BUFF_SIZE];   // SD read pixel buffer (16 bits per pixel)
+
+  // Check file exists and open it
+  if ((rawFile = SD.open(filename)) == NULL) {
+    Serial.println(F("File not found"));
+    return;
+  }
+
+ 
+
+  tft.setAddrWindow(x, y, x + rawWidth - 1, y + rawHeight - 1);
+
+  // Work out how many whole buffers to send
+  uint16_t nr = ((long)rawHeight * rawWidth)/BUFF_SIZE;
+  while(nr--) {
+    rawFile.read(sdbuffer, sizeof(sdbuffer));
+    tft.pushColors(sdbuffer, BUFF_SIZE);
+  }
+  
+  // Send any partial buffer
+  nr = ((long)rawHeight * rawWidth)%BUFF_SIZE;
+  if (nr) {
+    rawFile.read(sdbuffer, nr<<1); // We load  2 x BUFF_SIZE bytes
+    tft.pushColors(sdbuffer, nr);      // We send BUF_SIZE pixels
+  }
+    
+
+  rawFile.close();
+}
+
+/***************************************************************************************
+** Function name:           Support functions for drawBMP()
+** Descriptions:            Read 16- and 32-bit types from the SD card file
+***************************************************************************************/
+
+// BMP data is stored little-endian, Arduino is little-endian too.
+// May need to reverse subscript order if porting elsewhere.
+
+uint16_t read16(File& f) {
+  uint16_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read(); // MSB
+  return result;
+}
+
+uint32_t read32(File& f) {
+  uint32_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read();
+  ((uint8_t *)&result)[2] = f.read();
+  ((uint8_t *)&result)[3] = f.read(); // MSB
+  return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool posTouch(int x0, int y0, int x1, int y1){
+delay(5);
+double xSum=0;
+double ySum=0;
+bool result;
+if(ts.touched()){
+for(int i=0; i<15; i++){
+TS_Point p = ts.getPoint();
+xSum+=(p.x-170)*1.05;
+ySum+=(p.y-190)*1.05;
+}}
+
+
+int x=((xSum/182.81)-17)*1.07; //15 sampli * 320 pikseli  +kalibracja
+int y=((ySum/243.75)-8)*1.05; //15 sampli * 240 pikseli +kalibracja
+
+// tft.fillRect(280,0,40,40,0xFFFF);tft.setTextSize(1); tft.setCursor(280, 0); tft.println(x);tft.setCursor(280,10); tft.println(y);tft.setCursor(280,25); tft.println(xSum);
+
+//}
+
+if((x>x0)&&(x<x1)&&(y>y0)&&(y<y1)){result= 1;}else{result= 0;}
+
+x=-10;y=-10;
+return result;
+
+}
+
+void motorBrake(int pin){
+  do{}while(!buttonRead(A8));
+  analogWrite(pin, 220); delay(300); do{}while(!buttonRead(A8)); analogWrite(pin, 170); delay(1000); do{analogWrite(pin, 0);delay(200); analogWrite(pin, 255); delay(30);analogWrite(pin, 0);}while(!buttonRead(A8));
+  analogWrite(pin, 0);delay(200); analogWrite(pin, 255); delay(50);analogWrite(pin, 0);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+boolean clicker(int mid){
+  
+bool out;
+
+int laststateMid=buttonRead(mid); 
+delay(50);
+int currentstateMid=buttonRead(mid);
+
+
+  if((currentstateMid==!laststateMid)&&currentstateMid){out= 1;}else{out= 0;}
+
+return out;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool buttonRead(int pin){
+int value=0;
+uint8_t i=0;
+
+do { value+=analogRead(pin); i++; } while(i<20);
+value=value/i;
+
+if(value>400){return 1;}else{return 0;};
+
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+void budzik(){
+DateTime now = RTC.now();
+
+int whoWoke=100;
+bool brake=0;
+ if(budzic==1){
+if(alarm[0][0]==now.hour()&&alarm[0][1]==now.minute()/*&&(alarm[0][now.dayOfWeek()+1])*/&&(alarm[0][1]||alarm[0][0]))
+  {pobudka= 1;whoWoke=0;}else{
+               if(alarm[1][0]==now.hour()&&alarm[1][1]==now.minute()/*&&(alarm[1][now.dayOfWeek()+1])*/&&(alarm[1][1]||alarm[1][0]))
+  {pobudka= 1;whoWoke=1; wasScreenFilled=0;}else{
+               if(alarm[2][0]==now.hour()&&alarm[2][1]==now.minute()/*&&(alarm[2][now.dayOfWeek()+1])*/&&(alarm[2][1]||alarm[2][0]))
+  {pobudka= 1;whoWoke=2; wasScreenFilled=0;}else{
+               if(alarm[3][0]==now.hour()&&alarm[3][1]==now.minute()/*&&(alarm[3][now.dayOfWeek()+1])*/&&(alarm[3][1]||alarm[3][0]))
+  {pobudka= 1;whoWoke=3; wasScreenFilled=0;}else{
+               if(alarm[4][0]==now.hour()&&alarm[4][1]==now.minute()/*&&(alarm[4][now.dayOfWeek()+1])*/&&(alarm[4][1]||alarm[4][0]))
+  {pobudka= 1;whoWoke=4; wasScreenFilled=0;}else{pobudka=0;}
+               
+}}}}};
+
+while(pobudka){
+if(!wasScreenFilled){ drawRAW("wakeupp.raw", 0, 0, 320, 240); wasScreenFilled=1;};
+unsigned long budzTimer=millis();
+
+while(!(budzTimer==0)){
+analogWrite(pinSilnik, 255);
+if(buttonRead(A10)){budzic=0;pobudka=0;brake=1;digitalWrite(pinBuzzer, LOW); alarm[whoWoke][0]=0; alarm[whoWoke][1]=0;budzTimer=0; wasScreenFilled=0;};
+
+if((millis()-budzTimer)<300){digitalWrite(pinBuzzer, HIGH);}
+  else{if((millis()-budzTimer)<600){digitalWrite(pinBuzzer, LOW);}
+    else{if((millis()-budzTimer)<800){digitalWrite(pinBuzzer, HIGH);}
+      else{if((millis()-budzTimer)<1400){digitalWrite(pinBuzzer, LOW);}
+          else{budzTimer=0;/*analogWrite(pinSilnik, 0);*/ digitalWrite(pinBuzzer, LOW);}}}}
+}}
+if(brake){motorBrake(pinSilnik);brake=0;};
+}
+
+
+
+
+void alarmSet(uint8_t pos){
+
+if(!wasScreenFilled){ drawRAW("alasett.raw", 0, 0, 320, 240); wasScreenFilled=1;};
+bool tocz=1; 
+                                                                                            
+while(tocz){
+uint8_t prevHour=alarm[pos][0];
+uint8_t prevMinute=alarm[pos][1];
+ 
+
+
+
+tft.setTextSize(6);
+tft.setTextColor(0xFFFF);
+
+if(alarm[pos][0]>9){
+tft.setCursor(20,90);
+tft.print(alarm[pos][0]);
+}else{
+  tft.setCursor(20,90);
+tft.print(0);
+tft.setCursor(56,90);
+tft.print(alarm[pos][0]);
+}
+
+if((alarm[pos][1])>9){
+tft.setCursor(130,90);
+tft.print(alarm[pos][1]);
+}else{
+  tft.setCursor(130,90);
+tft.print(0);
+tft.setCursor(166,90);
+tft.print(alarm[pos][1]);
+}
+
+tft.setCursor(100,90);
+tft.print(":");
+
+  if(posTouch(10,2,105,80)){alarm[pos][0]+=5; if(!(alarm[pos][0]<24)){alarm[pos][0]=0;};}    //   tft.drawRect(10,2,95,60, 0xF800);
+  if(posTouch(10,180,105,235)){if(alarm[pos][0]){--alarm[pos][0];}else{alarm[pos][0]=23;};} //   tft.drawRect(10,180,95,55, 0xF800);
+  
+  if(posTouch(140,2,230,80)){alarm[pos][1]+=5; if(!(alarm[pos][1]<60)){alarm[pos][1]=0;};}       //  tft.drawRect(140,2,90,60, 0xF800);
+  if(posTouch(140,180,225,235)){if(alarm[pos][1]){--alarm[pos][1];}else{alarm[pos][1]=59;};}     //   tft.drawRect(140,180,85,55, 0xF800);
+  
+  if(posTouch(255,40,315,110)){alarm[pos][0]=0; alarm[pos][1]=0;};                              //   tft.drawRect(255,40,60,70, 0xF800);
+  if(posTouch(255,120,315,190)){wasScreenFilled=0;menuLevel=12;tocz=0;};                          //  tft.drawRect(255,120,60,70, 0xF800);
+  
+if(!(alarm[pos][0]==prevHour)){tft.fillRect(10, 80, 80, 80, 0);};
+if(!(alarm[pos][1]==prevMinute)){tft.fillRect(120, 80, 80, 80, 0);};
+
+
+}
+}
